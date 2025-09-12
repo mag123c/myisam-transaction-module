@@ -1,0 +1,30 @@
+name: myisam-transaction
+
+services:
+  mysql:
+    image: mariadb:10.3.24
+    ports:
+      - 33333:3306
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: myisam_transaction
+    command: --default-storage-engine=MyISAM
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d
+
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - '6380:6379'
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5

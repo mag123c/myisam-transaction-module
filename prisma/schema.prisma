@@ -1,0 +1,205 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// 고객 정보
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique @db.VarChar(100)
+  name         String   @db.VarChar(50)
+  phone        String   @db.VarChar(20)
+  iCashBalance Int      @default(0) @map("i_cash_balance") // 아이캐시 잔액
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // 관계
+  payments         Payment[] // 결제 내역
+  paymentHistories PaymentHistory[] // 결제 히스토리
+  carts            Cart[] // 장바구니(견적함)
+
+  @@map("users")
+}
+
+// 웨딩 업체 정보
+model Company {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(100)
+  email     String   @unique @db.VarChar(100)
+  phone     String   @db.VarChar(20)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // 관계
+  orders Order[] // 발주서
+
+  @@map("companies")
+}
+
+// 웨딩 서비스 상품 정보 (결제 테스트용 단순화)
+model Product {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(100) // 상품명
+  price     Int      // 가격 (원)
+  category  String   @db.VarChar(30)  // 카테고리 (웨딩홀/드레스/메이크업/촬영)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // 관계
+  cartItems CartItem[] // 장바구니 아이템
+
+  @@index([category]) // 카테고리별 조회 최적화
+  @@map("products")
+}
+
+// 장바구니(견적함)
+model Cart {
+  id          Int        @id @default(autoincrement())
+  userId      Int        @map("user_id")
+  status      CartStatus @default(PENDING) // 장바구니 상태
+  totalAmount Int        @default(0) @map("total_amount") // 총 금액
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  // 관계
+  user    User       @relation(fields: [userId], references: [id])
+  items   CartItem[] // 장바구니 아이템들
+  payment Payment? // 결제 정보
+
+  @@map("carts")
+}
+
+// 장바구니 아이템
+model CartItem {
+  id        Int @id @default(autoincrement())
+  cartId    Int @map("cart_id")
+  productId Int @map("product_id")
+  quantity  Int @default(1)
+  price     Int // 구매 시점 가격
+
+  // 관계
+  cart    Cart    @relation(fields: [cartId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("cart_items")
+}
+
+// 결제 정보
+model Payment {
+  id            Int           @id @default(autoincrement())
+  userId        Int           @map("user_id")
+  cartId        Int           @unique @map("cart_id") // 1:1 관계
+  status        PaymentStatus @default(PENDING) // 결제 상태
+  totalAmount   Int           @map("total_amount") // 총 결제 금액
+  iCashUsed     Int           @default(0) @map("i_cash_used") // 사용된 아이캐시
+  actualPayment Int           @map("actual_payment") // 실제 결제 금액 (총액 - 아이캐시)
+  paymentMethod String        @map("payment_method") @db.VarChar(50) // 결제 수단
+  transactionId String?       @map("transaction_id") @db.VarChar(100) // 외부 결제 트랜잭션 ID
+  paidAt        DateTime?     @map("paid_at") // 결제 완료 시간
+  cancelledAt   DateTime?     @map("cancelled_at") // 결제 취소 시간
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  // 관계
+  user      User             @relation(fields: [userId], references: [id])
+  cart      Cart             @relation(fields: [cartId], references: [id])
+  order     Order? // 발주서 (결제 성공 시 생성)
+  histories PaymentHistory[] // 결제 히스토리
+
+  @@index([userId, status]) // 사용자별 결제 상태 조회 최적화
+  @@index([createdAt]) // 결제 시간순 조회 최적화
+  @@map("payments")
+}
+
+// 발주서 (결제 성공 시 업체에게 발급)
+model Order {
+  id        Int         @id @default(autoincrement())
+  paymentId Int         @unique @map("payment_id") // 1:1 관계
+  companyId Int         @map("company_id") // 대표 업체 ID (첫 번째 상품 기준)
+  orderNo   String      @unique @map("order_no") @db.VarChar(50) // 발주서 번호
+  status    OrderStatus @default(ISSUED) // 발주서 상태
+  issuedAt  DateTime    @default(now()) @map("issued_at") // 발급 시간
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  // 관계
+  payment Payment @relation(fields: [paymentId], references: [id])
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([orderNo]) // 발주서 번호 검색 최적화
+  @@map("orders")
+}
+
+// 결제 히스토리 (결제 전/후 모든 상태 변경 기록)
+model PaymentHistory {
+  id          Int           @id @default(autoincrement())
+  paymentId   Int           @map("payment_id")
+  userId      Int           @map("user_id")
+  status      PaymentStatus // 변경된 상태
+  description String        @db.Text // 상태 변경 사유/설명
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  // 관계
+  payment Payment @relation(fields: [paymentId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@map("payment_histories")
+}
+
+// SMS 알림 기록
+model SmsNotification {
+  id            Int                @id @default(autoincrement())
+  paymentId     Int?               @map("payment_id") // nullable (결제 외 알림도 있을 수 있음)
+  recipientType RecipientType      @map("recipient_type") // 수신자 유형
+  phoneNumber   String             @map("phone_number") @db.VarChar(20)
+  message       String             @db.Text
+  status        NotificationStatus @default(PENDING) // 발송 상태
+  sentAt        DateTime?          @map("sent_at")
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  @@map("sms_notifications")
+}
+
+// 열거형 정의
+
+// 장바구니 상태
+enum CartStatus {
+  PENDING // 대기중
+  PAID // 결제완료
+  CANCELLED // 취소됨
+}
+
+// 결제 상태
+enum PaymentStatus {
+  PENDING // 결제 대기
+  PAID // 결제 완료
+  FAILED // 결제 실패
+  CANCELLED // 결제 취소
+  REFUNDED // 환불 완료
+}
+
+// 발주서 상태
+enum OrderStatus {
+  ISSUED // 발급됨
+  CONFIRMED // 업체 확인완료
+  COMPLETED // 서비스 완료
+  CANCELLED // 취소됨
+}
+
+// 알림 수신자 유형
+enum RecipientType {
+  CUSTOMER // 고객
+  ADMIN // 관리자
+  COMPANY // 업체 담당자
+}
+
+// 알림 발송 상태
+enum NotificationStatus {
+  PENDING // 발송 대기
+  SENT // 발송 완료
+  FAILED // 발송 실패
+}
